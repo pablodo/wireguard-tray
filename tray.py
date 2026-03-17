@@ -10,6 +10,8 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("AppIndicator3", "0.1")
 from gi.repository import Gtk, AppIndicator3
 
+from lang import t
+
 APP_NAME = "wireguard-tray"
 
 ICON_DIR = "/usr/share/wireguard-tray/icons"
@@ -75,23 +77,23 @@ def connect():
     try:
         run_wg("up", current_interface)
         indicator.set_icon(ICON_ON)
-        indicator.set_label("VPN включён", "")
-        notify("WireGuard", f"Подключён: {current_interface}", ICON_ON)
+        indicator.set_label(t("vpn_on"), "")
+        notify("WireGuard", t("connected", iface=current_interface), ICON_ON)
         return True
     except subprocess.CalledProcessError:
         indicator.set_icon(ICON_OFF)
-        notify("WireGuard", "Ошибка подключения")
+        notify("WireGuard", t("connection_error"))
         return False
 
 def disconnect():
     try:
         run_wg("down", current_interface)
         indicator.set_icon(ICON_OFF)
-        indicator.set_label("VPN выключен", "")
-        notify("WireGuard", f"Отключён: {current_interface}")
+        indicator.set_label(t("vpn_off"), "")
+        notify("WireGuard", t("disconnected", iface=current_interface))
         return True
     except subprocess.CalledProcessError:
-        notify("WireGuard", "Ошибка отключения")
+        notify("WireGuard", t("disconnection_error"))
         return False
 
 def on_toggle(item):
@@ -106,7 +108,7 @@ def on_interface_selected(_, iface):
     global current_interface
     current_interface = iface
     save_state()
-    notify("WireGuard", f"Выбран интерфейс: {iface}")
+    notify("WireGuard", t("interface_selected", iface=iface))
 
 def build_interface_menu():
     menu = Gtk.Menu()
@@ -118,7 +120,7 @@ def build_interface_menu():
                 item.connect("activate", on_interface_selected, iface)
                 menu.append(item)
     except PermissionError:
-        menu.append(Gtk.MenuItem(label="Нет доступа к /etc/wireguard"))
+        menu.append(Gtk.MenuItem(label=t("no_access")))
     menu.show_all()
     return menu
 
@@ -135,11 +137,11 @@ def create_tray():
     toggle = Gtk.CheckMenuItem(label="VPN")
     toggle.connect("toggled", on_toggle)
     menu.append(toggle)
-    iface_item = Gtk.MenuItem(label="Интерфейс")
+    iface_item = Gtk.MenuItem(label=t("interface"))
     iface_item.set_submenu(build_interface_menu())
     menu.append(iface_item)
     menu.append(Gtk.SeparatorMenuItem())
-    quit_item = Gtk.MenuItem(label="Выход")
+    quit_item = Gtk.MenuItem(label=t("exit"))
     quit_item.connect("activate", Gtk.main_quit)
     menu.append(quit_item)
     menu.show_all()
@@ -188,7 +190,7 @@ def handle_cli():
 
     if args.sudo_setup:
         if os.geteuid() != 0:
-            print("Запустите этот флаг с sudo!")
+            print(t("run_with_sudo"))
             sys.exit(1)
         user = os.getenv("SUDO_USER") or os.getenv("USER")
         sudoers_file = "/etc/sudoers.d/wireguard-tray"
@@ -202,9 +204,8 @@ def handle_cli():
         with open(sudoers_file, "w") as f:
             f.write("\n".join(rules) + "\n")
         os.chmod(sudoers_file, 0o440)
-        # права на /etc/wireguard
         subprocess.run(["sudo", "chmod", "750", "/etc/wireguard"])
-        print(f"Sudoers и права на /etc/wireguard настроены для {user}")
+        print(t("sudoers_configured", user=user))
         sys.exit(0)
 
 def main():

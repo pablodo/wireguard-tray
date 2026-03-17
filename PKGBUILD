@@ -13,17 +13,18 @@ install="wireguard-tray.install"
 package() {
     cd "$srcdir/$pkgname-$pkgver"
     
-    # Установка скрипта
+    # Install main script
     install -Dm755 tray.py "$pkgdir/usr/bin/wireguard-tray"
-    
-    # Установка иконок
+    install -Dm644 lang.py "$pkgdir/usr/share/wireguard-tray/lang.py"
+
+    # Install icons
     install -dm755 "$pkgdir/usr/share/wireguard-tray/icons"
     install -Dm644 icon-off.png "$pkgdir/usr/share/wireguard-tray/icons/icon-off.png"
     install -Dm644 icon-on.png "$pkgdir/usr/share/wireguard-tray/icons/icon-on.png"
-    
-    # Установка systemd service
+
+    # Install systemd service
     install -Dm644 wireguard-tray.service "$pkgdir/usr/lib/systemd/user/wireguard-tray.service"
-    
-    # Установка desktop файла
+
+    # Install desktop file
     install -Dm644 wireguard-tray.desktop "$pkgdir/usr/share/applications/wireguard-tray.desktop"
 }

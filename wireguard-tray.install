@@ -1,30 +1,30 @@
 post_install() {
 cat <<EOF
 =================================================
-WireGuard Tray успешно установлен!
+WireGuard Tray installed successfully!
 
-Быстрая настройка:
+Quick setup:
 
-    Настройка sudoers для работы без пароля:
+    Setup sudoers for passwordless operation:
     sudo wireguard-tray --sudo-setup
 
-    Запуск приложения:
+    Run the application:
     wireguard-tray
 
-    Добавление в автозагрузку:
+    Enable autostart:
     wireguard-tray --autostart
 
-    Удаление из автозагрузки:
+    Disable autostart:
     wireguard-tray --disable-autostart
 
-Дополнительные команды:
-wireguard-tray --help # Показать все доступные команды
-wireguard-tray --set wg0 # Установить интерфейс по умолчанию
-wireguard-tray --up wg0 # Подключиться к интерфейсу wg0
-wireguard-tray --down # Отключиться от текущего интерфейса
+Additional commands:
+wireguard-tray --help # Show all available commands
+wireguard-tray --set wg0 # Set default interface
+wireguard-tray --up wg0 # Connect to interface wg0
+wireguard-tray --down # Disconnect from current interface
 
-Важно: Разместите конфигурационные файлы WireGuard в /etc/wireguard/
-(например, wg0.conf, wg1.conf и т.д.)
+Important: Place WireGuard configuration files in /etc/wireguard/
+(e.g., wg0.conf, wg1.conf, etc.)
 
 =================================================
 EOF
