@@ -38,8 +38,16 @@ def notify(title, message, icon=ICON_OFF):
         stderr=subprocess.DEVNULL,
     )
 
+def _has_pkexec():
+    return os.path.isfile("/usr/bin/pkexec")
+
+
+def _sudo_cmd():
+    return "pkexec" if _has_pkexec() else "sudo"
+
+
 def run_wg(action, iface=None):
-    cmd = ["sudo", WG_QUICK, action]
+    cmd = [_sudo_cmd(), WG_QUICK, action]
     if iface:
         cmd.append(iface)
 

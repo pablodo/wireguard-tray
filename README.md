@@ -32,18 +32,30 @@ yay -S wireguard-tray
 paru -S wireguard-tray
 ```
 
-### Manual Installation
+### Manual Installation (Ubuntu/Debian/Generic Linux)
 
-1. Clone the repository:
+1. Install dependencies:
+   ```bash
+   sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 gir1.2-gtk-3.0 wireguard-tools libnotify-bin
+   ```
+
+2. Clone and install:
    ```bash
    git clone https://github.com/artemventvent/wireguard-tray.git
    cd wireguard-tray
+   sudo make install
    ```
 
-2. Build and install:
+3. Uninstall:
    ```bash
-   makepkg -si
+   sudo make uninstall
    ```
+
+### Arch Linux (AUR)
+
+```bash
+makepkg -si
+```
 
 ## Configuration
 
