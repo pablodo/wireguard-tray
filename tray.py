@@ -10,8 +10,6 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("AppIndicator3", "0.1")
 from gi.repository import Gtk, AppIndicator3
 
-from lang import t
-
 APP_NAME = "wireguard-tray"
 
 ICON_DIR = "/usr/share/wireguard-tray/icons"
@@ -19,17 +17,72 @@ ICON_OFF = os.path.join(ICON_DIR, "icon-off.png")
 ICON_ON = os.path.join(ICON_DIR, "icon-on.png")
 
 CONFIG_DIR = os.path.join(os.path.expanduser("~/.config"), APP_NAME)
-STATE_FILE = os.path.join(CONFIG_DIR, "state")
-
+WG_CONFIG_DIR = "/etc/wireguard"
 WG_QUICK = "/usr/bin/wg-quick"
 
-DEFAULT_INTERFACE = "wg0"
+TRANSLATIONS = {
+    "en": {
+        "vpn_off": "VPN disabled",
+        "connected": "Connected: {iface}",
+        "disconnected": "Disconnected: {iface}",
+        "connection_error": "Connection error",
+        "disconnection_error": "Disconnection error",
+        "no_configs": "No configs found in /etc/wireguard",
+        "exit": "Exit",
+        "run_with_sudo": "Run this flag with sudo!",
+        "sudoers_configured": (
+            "Sudoers and permissions for /etc/wireguard configured for {user}"
+        ),
+    },
+    "ru": {
+        "vpn_off": "VPN выключен",
+        "connected": "Подключён: {iface}",
+        "disconnected": "Отключён: {iface}",
+        "connection_error": "Ошибка подключения",
+        "disconnection_error": "Ошибка отключения",
+        "no_configs": "Конфигурации не найдены в /etc/wireguard",
+        "exit": "Выход",
+        "run_with_sudo": "Запустите этот флаг с sudo!",
+        "sudoers_configured": (
+            "Sudoers и права на /etc/wireguard настроены для {user}"
+        ),
+    },
+}
+DEFAULT_LANG = "en"
+
+
+def _detect_language():
+    env_lang = os.getenv("WIREGUARD_TRAY_LANG")
+    if env_lang and env_lang in TRANSLATIONS:
+        return env_lang
+    lang_file = os.path.join(CONFIG_DIR, "lang")
+    if os.path.exists(lang_file):
+        with open(lang_file, "r") as f:
+            lang = f.read().strip()
+            if lang in TRANSLATIONS:
+                return lang
+    sys_lang = os.getenv("LANG", "")
+    for code in TRANSLATIONS:
+        if sys_lang.startswith(code):
+            return code
+    return DEFAULT_LANG
+
+
+_current_lang = _detect_language()
+
+
+def t(key, **kwargs):
+    text = TRANSLATIONS.get(_current_lang, TRANSLATIONS[DEFAULT_LANG]).get(
+        key, TRANSLATIONS[DEFAULT_LANG].get(key, key)
+    )
+    if kwargs:
+        text = text.format(**kwargs)
+    return text
+
 
 indicator = None
-current_interface = DEFAULT_INTERFACE
+active_interfaces = set()
 
-def ensure_config_dir():
-    os.makedirs(CONFIG_DIR, exist_ok=True)
 
 def notify(title, message, icon=ICON_OFF):
     subprocess.Popen(
@@ -38,131 +91,153 @@ def notify(title, message, icon=ICON_OFF):
         stderr=subprocess.DEVNULL,
     )
 
-def _has_pkexec():
-    return os.path.isfile("/usr/bin/pkexec")
+
+def _config_path(iface):
+    return os.path.join(WG_CONFIG_DIR, f"{iface}.conf")
 
 
-def _sudo_cmd():
-    return "pkexec" if _has_pkexec() else "sudo"
-
-
-def run_wg(action, iface=None):
-    cmd = [_sudo_cmd(), WG_QUICK, action]
-    if iface:
-        cmd.append(iface)
-
+def run_wg(action, iface):
+    """Returns True on success, False on failure."""
+    cmd = ["sudo", WG_QUICK, action, _config_path(iface)]
     result = subprocess.run(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
-
     if result.returncode != 0:
         stderr = result.stderr.lower()
         if action == "up" and "already exists" in stderr:
-            print(f"wg-{iface} already up")
-            return
+            return True
         if action == "down" and "not found" in stderr:
-            print(f"wg-{iface} already down")
-            return
-        print(result.stderr.strip())
-        sys.exit(result.returncode)
-
-def load_state():
-    global current_interface
-    ensure_config_dir()
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            current_interface = f.read().strip() or DEFAULT_INTERFACE
-
-def save_state():
-    ensure_config_dir()
-    with open(STATE_FILE, "w") as f:
-        f.write(current_interface)
-
-def connect():
-    try:
-        run_wg("up", current_interface)
-        indicator.set_icon(ICON_ON)
-        indicator.set_label(t("vpn_on"), "")
-        notify("WireGuard", t("connected", iface=current_interface), ICON_ON)
-        return True
-    except subprocess.CalledProcessError:
-        indicator.set_icon(ICON_OFF)
-        notify("WireGuard", t("connection_error"))
+            return True
+        print(f"wg-quick {action} {iface}: {result.stderr.strip()}")
         return False
+    return True
 
-def disconnect():
-    try:
-        run_wg("down", current_interface)
-        indicator.set_icon(ICON_OFF)
-        indicator.set_label(t("vpn_off"), "")
-        notify("WireGuard", t("disconnected", iface=current_interface))
-        return True
-    except subprocess.CalledProcessError:
-        notify("WireGuard", t("disconnection_error"))
-        return False
 
-def on_toggle(item):
-    if item.get_active():
-        if not connect():
-            item.set_active(False)
+def _is_valid_config(config_text):
+    return "[Interface]" in config_text
+
+
+def get_available_interfaces():
+    result = subprocess.run(
+        ["sudo", "ls", WG_CONFIG_DIR],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    if result.returncode != 0:
+        return []
+    interfaces = []
+    for f in sorted(result.stdout.splitlines()):
+        if not f.endswith(".conf"):
+            continue
+        iface = f[:-5]
+        check = subprocess.run(
+            ["sudo", "cat", _config_path(iface)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        if check.returncode == 0 and _is_valid_config(check.stdout):
+            interfaces.append(iface)
+    return interfaces
+
+
+def get_active_interfaces():
+    result = subprocess.run(
+        ["sudo", "wg", "show", "interfaces"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return set(result.stdout.strip().split())
+    return set()
+
+
+def update_icon():
+    if active_interfaces:
+        indicator.set_icon_full(ICON_ON, "VPN active")
+        label = ", ".join(sorted(active_interfaces))
+        indicator.set_label(label, "")
     else:
-        if not disconnect():
+        indicator.set_icon_full(ICON_OFF, "VPN inactive")
+        indicator.set_label(t("vpn_off"), "")
+
+
+def on_toggle_interface(item, iface):
+    if item.get_active():
+        if run_wg("up", iface):
+            active_interfaces.add(iface)
+            notify("WireGuard", t("connected", iface=iface), ICON_ON)
+        else:
+            item.handler_block_by_func(on_toggle_interface)
+            item.set_active(False)
+            item.handler_unblock_by_func(on_toggle_interface)
+            notify("WireGuard", t("connection_error"))
+    else:
+        if run_wg("down", iface):
+            active_interfaces.discard(iface)
+            notify("WireGuard", t("disconnected", iface=iface))
+        else:
+            item.handler_block_by_func(on_toggle_interface)
             item.set_active(True)
+            item.handler_unblock_by_func(on_toggle_interface)
+            notify("WireGuard", t("disconnection_error"))
+    update_icon()
 
-def on_interface_selected(_, iface):
-    global current_interface
-    current_interface = iface
-    save_state()
-    notify("WireGuard", t("interface_selected", iface=iface))
-
-def build_interface_menu():
-    menu = Gtk.Menu()
-    try:
-        for f in os.listdir("/etc/wireguard"):
-            if f.endswith(".conf"):
-                iface = f[:-5]
-                item = Gtk.MenuItem(label=iface)
-                item.connect("activate", on_interface_selected, iface)
-                menu.append(item)
-    except PermissionError:
-        menu.append(Gtk.MenuItem(label=t("no_access")))
-    menu.show_all()
-    return menu
 
 def create_tray():
-    global indicator
+    global indicator, active_interfaces
+    active_interfaces = get_active_interfaces()
+    available = get_available_interfaces()
+
     indicator = AppIndicator3.Indicator.new(
         APP_NAME,
         ICON_OFF,
         AppIndicator3.IndicatorCategory.APPLICATION_STATUS,
     )
     indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
-    indicator.set_label("VPN", "")
+
     menu = Gtk.Menu()
-    toggle = Gtk.CheckMenuItem(label="VPN")
-    toggle.connect("toggled", on_toggle)
-    menu.append(toggle)
-    iface_item = Gtk.MenuItem(label=t("interface"))
-    iface_item.set_submenu(build_interface_menu())
-    menu.append(iface_item)
+
+    if available:
+        for iface in available:
+            item = Gtk.CheckMenuItem(label=iface)
+            item.set_active(iface in active_interfaces)
+            item.connect("toggled", on_toggle_interface, iface)
+            menu.append(item)
+    else:
+        no_configs = Gtk.MenuItem(label=t("no_configs"))
+        no_configs.set_sensitive(False)
+        menu.append(no_configs)
+
     menu.append(Gtk.SeparatorMenuItem())
     quit_item = Gtk.MenuItem(label=t("exit"))
     quit_item.connect("activate", Gtk.main_quit)
     menu.append(quit_item)
     menu.show_all()
     indicator.set_menu(menu)
+    update_icon()
+
 
 def handle_cli():
     parser = argparse.ArgumentParser(prog=APP_NAME)
     parser.add_argument("-a", "--autostart", action="store_true", help="Enable autostart")
-    parser.add_argument("-d", "--disable-autostart", action="store_true", help="Disable autostart")
-    parser.add_argument("-u", "--up", metavar="IFACE", help="Bring interface up and exit")
-    parser.add_argument("-D", "--down", action="store_true", help="Bring interface down and exit")
-    parser.add_argument("-s", "--sudo-setup", action="store_true", help="Setup sudoers for WireGuard")
-    parser.add_argument("-S", "--set", metavar="IFACE", help="Set default interface")
+    parser.add_argument(
+        "-d", "--disable-autostart", action="store_true", help="Disable autostart"
+    )
+    parser.add_argument(
+        "-u", "--up", metavar="IFACE", nargs="+", help="Bring interface(s) up and exit"
+    )
+    parser.add_argument(
+        "-D", "--down", metavar="IFACE", nargs="+", help="Bring interface(s) down and exit"
+    )
+    parser.add_argument(
+        "-s", "--sudo-setup", action="store_true", help="Setup sudoers for WireGuard"
+    )
     parser.add_argument("-v", "--version", action="store_true", help="Show version")
 
     args = parser.parse_args()
@@ -181,20 +256,13 @@ def handle_cli():
         print("Autostart disabled")
         sys.exit(0)
 
-    if args.set:
-        global current_interface
-        current_interface = args.set
-        save_state()
-        print(f"Default interface set to {args.set}")
-        sys.exit(0)
-
     if args.up:
-        run_wg("up", args.up)
-        sys.exit(0)
+        failed = any(not run_wg("up", iface) for iface in args.up)
+        sys.exit(1 if failed else 0)
 
     if args.down:
-        run_wg("down", current_interface)
-        sys.exit(0)
+        failed = any(not run_wg("down", iface) for iface in args.down)
+        sys.exit(1 if failed else 0)
 
     if args.sudo_setup:
         if os.geteuid() != 0:
@@ -205,6 +273,8 @@ def handle_cli():
         rules = [
             f"{user} ALL=(root) NOPASSWD: /usr/bin/wg-quick",
             f"{user} ALL=(root) NOPASSWD: /usr/bin/wg",
+            f"{user} ALL=(root) NOPASSWD: /usr/bin/ls {WG_CONFIG_DIR}",
+            f"{user} ALL=(root) NOPASSWD: /usr/bin/cat {WG_CONFIG_DIR}/*",
             f"{user} ALL=(root) NOPASSWD: /usr/bin/ip",
             f"{user} ALL=(root) NOPASSWD: /usr/bin/resolvectl",
             f"{user} ALL=(root) NOPASSWD: /usr/bin/resolvconf",
@@ -212,15 +282,16 @@ def handle_cli():
         with open(sudoers_file, "w") as f:
             f.write("\n".join(rules) + "\n")
         os.chmod(sudoers_file, 0o440)
-        subprocess.run(["sudo", "chmod", "750", "/etc/wireguard"])
+        os.chmod("/etc/wireguard", 0o750)
         print(t("sudoers_configured", user=user))
         sys.exit(0)
 
+
 def main():
     handle_cli()
-    load_state()
     create_tray()
     Gtk.main()
+
 
 if __name__ == "__main__":
     main()

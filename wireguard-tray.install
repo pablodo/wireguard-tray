@@ -18,13 +18,13 @@ Quick setup:
     wireguard-tray --disable-autostart
 
 Additional commands:
-wireguard-tray --help # Show all available commands
-wireguard-tray --set wg0 # Set default interface
-wireguard-tray --up wg0 # Connect to interface wg0
-wireguard-tray --down # Disconnect from current interface
+wireguard-tray --help           # Show all available commands
+wireguard-tray --up wg0 wg1    # Connect to interface(s)
+wireguard-tray --down wg0 wg1  # Disconnect from interface(s)
 
 Important: Place WireGuard configuration files in /etc/wireguard/
-(e.g., wg0.conf, wg1.conf, etc.)
+(e.g., wg0.conf, wg-dev.conf, wg-prod.conf)
+Avoid names that conflict with ip-link keywords (e.g., "dev", "type").
 
 =================================================
 EOF

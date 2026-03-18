@@ -15,7 +15,6 @@ package() {
     
     # Install main script
     install -Dm755 tray.py "$pkgdir/usr/bin/wireguard-tray"
-    install -Dm644 lang.py "$pkgdir/usr/share/wireguard-tray/lang.py"
 
     # Install icons
     install -dm755 "$pkgdir/usr/share/wireguard-tray/icons"
